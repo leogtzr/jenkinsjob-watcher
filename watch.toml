@@ -1,0 +1,11 @@
+# Intervalo por defecto (en segundos). Se puede sobreescribir por argumento.
+interval = 10
+
+# Comando que se ejecuta cuando el job termina.
+# Tiene disponibles estas variables de entorno:
+#   BUILD_NUMBER
+#   BUILD_RESULT
+#   BUILD_URL
+#   BUILD_DISPLAY_NAME
+
+notify_command = "/Users/lgutierrezramirez/bin/jenkins-notify.sh"

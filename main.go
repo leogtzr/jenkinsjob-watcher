@@ -7,10 +7,12 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/leogtzr/jenkinsjob-watcher/internal/config"
 	"github.com/leogtzr/jenkinsjob-watcher/internal/jenkins"
 )
 
@@ -49,16 +51,25 @@ func run() error {
 		return errMissingArgument
 	}
 
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
 	jenkinsJobUrl := os.Args[1]
 	jenkinsJobUrl = sanitizeUrl(jenkinsJobUrl)
 	jobApiURL := buildApiUrl(jenkinsJobUrl)
 
-	interval, err := getCheckTimeInterval(os.Args[:])
-	if err != nil {
-		return fmt.Errorf("error: getting time interval: %w", err)
+	interval := time.Duration(cfg.Interval) * time.Second
+
+	// Override
+	if len(os.Args) >= 3 {
+		interval, err = getCheckTimeInterval(os.Args[:])
+		if err != nil {
+			return fmt.Errorf("error: getting time interval: %w", err)
+		}
 	}
 
-	//_, _ = fmt.Fprintf(os.Stdout, "jenkins job url: %s\n", jenkinsJobUrl)
 	jenkinsWatcherUser, err := mustEnv("JENKINS_WATCHER_USER")
 	if err != nil {
 		return err
@@ -69,17 +80,14 @@ func run() error {
 		return err
 	}
 
-	//_, _ = fmt.Fprintf(os.Stdout, "Jenkins job URL: %s\n", jenkinsJobUrl)
-	//_, _ = fmt.Fprintf(os.Stdout, "Job API URL: %s\n", jobApiURL)
-	//_, _ = fmt.Fprintf(os.Stdout, "User: %s\n", jenkinsWatcherUser)
-	//_, _ = fmt.Fprintf(os.Stdout, "Api Token: %s\n", jenkinsWatcherApiToken)
-
 	req, err := buildRequest(jobApiURL, jenkinsWatcherUser, jenkinsWatcherApiToken)
 	if err != nil {
 		return err
 	}
 
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+	}
 
 	_, _ = fmt.Fprintf(os.Stdout, "Running check every %v\n", interval)
 
@@ -88,7 +96,7 @@ func run() error {
 		reqCopy := req.Clone(req.Context())
 		resp, err := client.Do(reqCopy)
 		if err != nil {
-			return fmt.Errorf("error creating request: %w", err)
+			return fmt.Errorf("error calling jenkins: %w", err)
 		}
 
 		build, err := getBuildInformation(resp)
@@ -102,7 +110,28 @@ func run() error {
 
 		// If the job is not building, quit.
 		if !build.Building {
-			fmt.Println("Job terminado.")
+			// Notify ...
+			if cfg.NotifyCommand != "" {
+				result := "null"
+				if build.Result != nil {
+					result = *build.Result
+				}
+
+				cmd := exec.Command("sh", "-c", cfg.NotifyCommand)
+				cmd.Env = append(os.Environ(),
+					"BUILD_NUMBER="+strconv.Itoa(build.Number),
+					"BUILD_RESULT="+result,
+					"BUILD_URL="+build.URL,
+					"BUILD_DISPLAY_NAME="+build.DisplayName,
+				)
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+
+				if err := cmd.Run(); err != nil {
+					_, _ = fmt.Fprintf(os.Stderr, "error executing jenkins: %s\n", err)
+				}
+			}
+			_, _ = fmt.Fprintf(os.Stdout, "Job terminado.\n")
 			return nil
 		}
 
