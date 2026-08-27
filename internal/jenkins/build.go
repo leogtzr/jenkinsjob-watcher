@@ -21,9 +21,10 @@ func (b Build) String() string {
 	}
 
 	return fmt.Sprintf(
-		"Build #%d (%s) | building=%t | result=%s",
+		"Build #%d (%s - '%s') | building=%t | result=%s",
 		b.Number,
 		b.DisplayName,
+		b.FullDisplayName,
 		b.Building,
 		result,
 	)

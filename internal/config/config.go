@@ -18,7 +18,7 @@ func Load() (Config, error) {
 		Interval: 20,
 	}
 
-	candidates := []string{}
+	var candidates []string
 
 	// cwd:
 	candidates = append(candidates, "watch.toml")

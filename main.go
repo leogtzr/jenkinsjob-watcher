@@ -31,17 +31,15 @@ func main() {
 func getCheckTimeInterval(args []string) (time.Duration, error) {
 	interval := 20 * time.Second
 
-	if len(args) >= 3 {
-		seconds, err := strconv.Atoi(args[2])
-		if err != nil {
-			return 0, fmt.Errorf("el intervalo debe ser un número entero: %w", err)
-		}
-		if seconds < 1 {
-			return 0, fmt.Errorf("el intervalo debe ser mayor a 0")
-		}
-
-		interval = time.Duration(seconds) * time.Second
+	seconds, err := strconv.Atoi(args[2])
+	if err != nil {
+		return 0, fmt.Errorf("el intervalo debe ser un número entero: %w", err)
 	}
+	if seconds < 1 {
+		return 0, fmt.Errorf("el intervalo debe ser mayor a 0")
+	}
+
+	interval = time.Duration(seconds) * time.Second
 
 	return interval, nil
 }
@@ -54,6 +52,10 @@ func run() error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
+	}
+
+	if cfg.Interval < 1 {
+		cfg.Interval = 10
 	}
 
 	jenkinsJobUrl := os.Args[1]
@@ -89,7 +91,11 @@ func run() error {
 		Timeout: 15 * time.Second,
 	}
 
+	// _, _ = fmt.Fprintf(os.Stdout, "Running check every %v\n", interval)
+	_, _ = fmt.Fprintf(os.Stdout, "Started at %s\n", time.Now().Format("2006-01-02 15:04:05"))
 	_, _ = fmt.Fprintf(os.Stdout, "Running check every %v\n", interval)
+
+	isFirstIteration := true
 
 	for {
 		//Copy the request (the body is consumed)
@@ -106,38 +112,47 @@ func run() error {
 			return err
 		}
 
-		_, _ = fmt.Fprintf(os.Stdout, "Build: %s\n", build)
+		// _, _ = fmt.Fprintf(os.Stdout, "%s\n", build)
+		_, _ = fmt.Printf("[%s] %s\n", time.Now().Format("15:04:05"), build)
 
 		// If the job is not building, quit.
 		if !build.Building {
 			// Notify ...
-			if cfg.NotifyCommand != "" {
-				result := "null"
-				if build.Result != nil {
-					result = *build.Result
-				}
-
-				cmd := exec.Command("sh", "-c", cfg.NotifyCommand)
-				cmd.Env = append(os.Environ(),
-					"BUILD_NUMBER="+strconv.Itoa(build.Number),
-					"BUILD_RESULT="+result,
-					"BUILD_URL="+build.URL,
-					"BUILD_DISPLAY_NAME="+build.DisplayName,
-				)
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
-
-				if err := cmd.Run(); err != nil {
-					_, _ = fmt.Fprintf(os.Stderr, "error executing jenkins: %s\n", err)
-				}
+			err = notify(&cfg, &build, isFirstIteration)
+			if err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "error: %s\n", err)
 			}
 			_, _ = fmt.Fprintf(os.Stdout, "Job terminado.\n")
 			return nil
 		}
+		isFirstIteration = false
 
 		time.Sleep(interval)
 	}
+}
 
+func notify(cfg *config.Config, build *jenkins.Build, alreadyFinished bool) error {
+	if cfg.NotifyCommand != "" {
+		result := "null"
+		if build.Result != nil {
+			result = *build.Result
+		}
+
+		cmd := exec.Command("sh", "-c", cfg.NotifyCommand)
+		cmd.Env = append(os.Environ(),
+			"BUILD_NUMBER="+strconv.Itoa(build.Number),
+			"BUILD_RESULT="+result,
+			"BUILD_URL="+build.URL,
+			"BUILD_DISPLAY_NAME="+build.DisplayName,
+			"BUILD_ALREADY_FINISHED="+strconv.FormatBool(alreadyFinished),
+		)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "error executing jenkins: %s\n", err)
+		}
+	}
 	return nil
 }
 
@@ -203,7 +218,7 @@ func sanitizeUrl(url string) string {
 func mustEnv(key string) (string, error) {
 	val, ok := os.LookupEnv(key)
 	if !ok {
-		return "", errMissingJenkinsEnvVar
+		return "", fmt.Errorf("environment variable %s not set", key)
 	}
 
 	return val, nil
