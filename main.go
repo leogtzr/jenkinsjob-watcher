@@ -113,10 +113,12 @@ func run() error {
 		}
 
 		// _, _ = fmt.Fprintf(os.Stdout, "%s\n", build)
-		_, _ = fmt.Printf("[%s] %s\n", time.Now().Format("15:04:05"), build)
+		// _, _ = fmt.Printf("[%s] %s\n", time.Now().Format("15:04:05"), build)
+		printStatus(&build)
 
 		// If the job is not building, quit.
 		if !build.Building {
+			_, _ = fmt.Fprintf(os.Stdout, "\n")
 			// Notify ...
 			err = notify(&cfg, &build, isFirstIteration)
 			if err != nil {
@@ -222,4 +224,24 @@ func mustEnv(key string) (string, error) {
 	}
 
 	return val, nil
+}
+
+func printStatus(build *jenkins.Build) {
+	now := time.Now().Format("15:04:05")
+	line := fmt.Sprintf("\r[%s] #%d  building=%t  result=%s",
+		now,
+		build.Number,
+		build.Building,
+		resultString(build),
+	)
+
+	// \033[K limpia el resto de la línea (por si la nueva es más corta)
+	fmt.Printf("%s\033[K", line)
+}
+
+func resultString(b *jenkins.Build) string {
+	if b.Result == nil {
+		return "null"
+	}
+	return *b.Result
 }
